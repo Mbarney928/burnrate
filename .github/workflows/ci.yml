@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, vet, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Verify modules
+        run: go mod verify
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+      - name: go vet
+        run: go vet ./...
+      - name: Tests (race detector) with coverage
+        run: |
+          go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$3); print $3}')
+          awk -v t="$total" 'BEGIN { if (t < 85) { print "coverage " t "% is below 85%"; exit 1 } }'
+      - name: Build
+        run: CGO_ENABLED=0 go build -trimpath -o bin/burnrate ./cmd/burnrate
+      - name: Smoke test (migrate, seed, report, serve, health check)
+        env:
+          BURNRATE_ADDR: 127.0.0.1:8080
+          BURNRATE_LOG_LEVEL: warn
+        run: |
+          export BURNRATE_DB_PATH="$RUNNER_TEMP/smoke.db"
+          ./bin/burnrate migrate
+          ./bin/burnrate seed > /dev/null
+          ./bin/burnrate report | tee "$RUNNER_TEMP/report.txt"
+          grep -q PAGE "$RUNNER_TEMP/report.txt"
+          ./bin/burnrate serve &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && exit 0; sleep 1; done
+          exit 1
+
+  container:
+    name: Container build and run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build -t burnrate:ci .
+      - name: Run as non-root and health check
+        run: |
+          test "$(docker image inspect burnrate:ci --format '{{.Config.User}}')" = "nonroot:nonroot"
+          docker run -d --name burnrate -p 127.0.0.1:8080:8080 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true burnrate:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && exit 0; sleep 1; done
+          docker logs burnrate
+          exit 1
+
+  security:
+    name: Secret scan, vulnerability audit, SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history so every commit is scanned
+          persist-credentials: false
+      - name: Gitleaks (full history)
+        run: |
+          curl -sSfL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks detect --source . --log-opts="--all" --redact --no-banner -v
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: govulncheck (known vulnerabilities in reachable code)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: gosec (static security analysis)
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 -quiet ./...
