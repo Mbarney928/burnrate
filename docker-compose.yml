@@ -1,0 +1,23 @@
+# Local development stack. The port is bound to 127.0.0.1 only, so the API is not
+# reachable from other machines on your network.
+services:
+  burnrate:
+    build: .
+    image: burnrate:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BURNRATE_ADDR: 0.0.0.0:8080
+      BURNRATE_DB_PATH: /data/burnrate.db
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - burnrate-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+volumes:
+  burnrate-data:

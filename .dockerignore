@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+*.db
+*.db-*
+*.sqlite*
+*.pem
+*.key
+secrets/
+bin/
+coverage.*
+*.md
+!README.md
+docker-compose.yml
