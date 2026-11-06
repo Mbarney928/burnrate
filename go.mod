@@ -2,7 +2,10 @@ module github.com/Mbarney928/burnrate
 
 go 1.27.3
 
-require modernc.org/sqlite v1.61.1
+require (
+	github.com/go-chi/chi/v5 v5.5.0
+	modernc.org/sqlite v1.61.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect

@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: burnrate
+  version: 1.0.0
+  summary: SLO error-budget and burn-rate tracking.
+  description: |
+    Register services and their SLOs, report good/total event counts, and get error-budget
+    status with multi-window, multi-burn-rate alerts (Google SRE Workbook).
+
+    All `/api/v1` endpoints need `Authorization: Bearer <token>`. Create tokens with
+    `burnrate token create`. `viewer` tokens can read; `editor` tokens can also write.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - bearer: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness and database health
+      security: []
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string, const: ok } } }
+        "503":
+          description: Database unreachable
+  /openapi.yaml:
+    get:
+      summary: This document
+      security: []
+      responses:
+        "200": { description: OpenAPI document, content: { application/yaml: {} } }
+  /api/v1/status:
+    get:
+      summary: Status of every SLO, most urgent first
+      parameters: [{ $ref: "#/components/parameters/at" }]
+      responses:
+        "200":
+          description: Pages first, then tickets, then least budget remaining
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slos: { type: array, items: { $ref: "#/components/schemas/SLOStatus" } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/services:
+    get:
+      summary: List services
+      responses:
+        "200":
+          description: Services ordered by name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services: { type: array, items: { $ref: "#/components/schemas/Service" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Register a service (editor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateService" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Service" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/services/{service}:
+    parameters: [{ $ref: "#/components/parameters/service" }]
+    get:
+      summary: Get a service
+      responses:
+        "200": { description: The service, content: { application/json: { schema: { $ref: "#/components/schemas/Service" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/services/{service}/slos:
+    parameters: [{ $ref: "#/components/parameters/service" }]
+    get:
+      summary: List a service's SLOs
+      responses:
+        "200":
+          description: SLOs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slos: { type: array, items: { $ref: "#/components/schemas/SLO" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      summary: Add an SLO to a service (editor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSLO" }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/SLO" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/slos/{id}:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    get:
+      summary: Get an SLO
+      responses:
+        "200": { description: The SLO, content: { application/json: { schema: { $ref: "#/components/schemas/SLO" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/slos/{id}/status:
+    parameters: [{ $ref: "#/components/parameters/id" }, { $ref: "#/components/parameters/at" }]
+    get:
+      summary: Error-budget status of one SLO
+      responses:
+        "200": { description: Status, content: { application/json: { schema: { $ref: "#/components/schemas/SLOStatus" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/slos/{id}/events:
+    parameters: [{ $ref: "#/components/parameters/id" }]
+    post:
+      summary: Report good/total event counts (editor)
+      description: |
+        Counts are added to per-minute buckets, so several reporters may send the same
+        minute. The batch is all-or-nothing. Timestamps may be up to 5 minutes in the future
+        (clock skew) and no older than the SLO window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              additionalProperties: false
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [timestamp, good, total]
+                    additionalProperties: false
+                    properties:
+                      timestamp: { type: string, format: date-time }
+                      good: { type: integer, minimum: 0 }
+                      total: { type: integer, minimum: 1, maximum: 1000000000 }
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema: { type: object, properties: { accepted: { type: integer } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { description: Body larger than 1 MiB }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, description: "brt_... token from `burnrate token create`" }
+  parameters:
+    service: { name: service, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9-]{1,62}$" } }
+    id: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    at:
+      name: at
+      in: query
+      required: false
+      description: Evaluate as of this instant (RFC 3339). Defaults to now.
+      schema: { type: string, format: date-time }
+  schemas:
+    CreateService:
+      type: object
+      required: [name, team]
+      additionalProperties: false
+      properties:
+        name: { type: string, pattern: "^[a-z][a-z0-9-]{1,62}$", examples: [checkout-api] }
+        team: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+    Service:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        team: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+    CreateSLO:
+      type: object
+      required: [name, target, window_days]
+      additionalProperties: false
+      properties:
+        name: { type: string, pattern: "^[a-z][a-z0-9-]{1,62}$", examples: [availability] }
+        target: { type: number, minimum: 0.5, maximum: 0.99999, examples: [0.999] }
+        window_days: { type: integer, minimum: 1, maximum: 90, examples: [30] }
+    SLO:
+      type: object
+      properties:
+        id: { type: integer }
+        service_id: { type: integer }
+        service: { type: string }
+        name: { type: string }
+        target: { type: number }
+        window_days: { type: integer }
+        created_at: { type: string, format: date-time }
+    Status:
+      type: object
+      properties:
+        at: { type: string, format: date-time }
+        good: { type: integer }
+        total: { type: integer }
+        sli: { type: [number, "null"], description: "good/total over the SLO window; null without traffic" }
+        error_budget: { type: number, description: "1 - target" }
+        budget_consumed: { type: number, description: "Share of the budget spent; above 1 means overspent" }
+        budget_remaining: { type: number }
+        exhausted: { type: boolean }
+        hours_to_exhaustion: { type: [number, "null"], description: "Linear projection at the 6h burn rate" }
+        burn_rates:
+          type: array
+          items:
+            type: object
+            properties:
+              window: { type: string, examples: [5m, 1h, 3d] }
+              good: { type: integer }
+              total: { type: integer }
+              error_rate: { type: number }
+              burn_rate: { type: number }
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              rule: { type: string, enum: [fast-burn, sustained-burn, slow-burn] }
+              severity: { type: string, enum: [page, ticket] }
+              long_window: { type: string }
+              short_window: { type: string }
+              threshold: { type: number }
+              long_burn: { type: number }
+              short_burn: { type: number }
+              firing: { type: boolean }
+        severity: { type: string, enum: [none, ticket, page] }
+    SLOStatus:
+      type: object
+      properties:
+        slo: { $ref: "#/components/schemas/SLO" }
+        status: { $ref: "#/components/schemas/Status" }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields: { type: object, additionalProperties: { type: string } }
+  responses:
+    ValidationFailed: { description: Invalid input, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unauthorized: { description: Missing or invalid token, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Forbidden: { description: Token role cannot write, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: No such resource, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Conflict: { description: Already exists, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    RateLimited: { description: Too many requests, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
