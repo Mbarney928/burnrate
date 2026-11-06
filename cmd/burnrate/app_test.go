@@ -176,7 +176,7 @@ func TestServeFailsWhenAddressInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	c.env["BURNRATE_ADDR"] = ln.Addr().String()
 	if code, _, _ := c.run(context.Background(), "serve"); code != 1 {
 		t.Errorf("serve on a busy port: code %d, want 1", code)

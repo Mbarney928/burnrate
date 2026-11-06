@@ -115,7 +115,7 @@ func (a *app) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	fmt.Fprintln(a.stdout, "database is up to date")
 	return nil
 }
@@ -125,7 +125,7 @@ func (a *app) serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Service:      service.New(st, a.now),
@@ -174,7 +174,7 @@ func (a *app) seed(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	now := a.now()
 	toks, err := seed.Run(ctx, st, service.New(st, a.now), now)
 	if err != nil {
@@ -213,7 +213,7 @@ func (a *app) token(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	plain, hash, err := auth.NewToken()
 	if err != nil {
 		return err
@@ -247,7 +247,7 @@ func (a *app) report(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	all, err := service.New(st, a.now).Overview(ctx, at)
 	if err != nil {
 		return err

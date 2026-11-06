@@ -121,7 +121,7 @@ func (s *Store) ListServices(ctx context.Context) ([]model.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []model.Service{}
 	for rows.Next() {
 		svc, err := scanService(rows)
@@ -161,7 +161,7 @@ func (s *Store) ListSLOs(ctx context.Context, serviceID int64) ([]model.SLO, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []model.SLO{}
 	for rows.Next() {
 		o, err := scanSLO(rows)
@@ -181,7 +181,7 @@ func (s *Store) AddEvents(ctx context.Context, sloID int64, buckets []slo.Bucket
 		if err != nil {
 			return err
 		}
-		defer stmt.Close()
+		defer func() { _ = stmt.Close() }()
 		for _, b := range buckets {
 			minute := b.Start.Truncate(time.Minute).Unix()
 			if _, err := stmt.ExecContext(ctx, sloID, minute, b.Good, b.Total); err != nil {
@@ -200,7 +200,7 @@ func (s *Store) Buckets(ctx context.Context, sloID int64, from, to time.Time) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []slo.Bucket
 	for rows.Next() {
 		var minute int64

@@ -119,7 +119,7 @@ func (e *env) do(t *testing.T, method, path, token, body string) resp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, _ := io.ReadAll(res.Body)
 	out := resp{status: res.StatusCode, header: res.Header, raw: string(raw)}
 	_ = json.Unmarshal(raw, &out.body)
@@ -327,8 +327,8 @@ func TestRecovererHidesPanics(t *testing.T) {
 
 	abort := recoverer(log)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
 	defer func() {
-		if rec := recover(); rec != http.ErrAbortHandler {
-			t.Errorf("ErrAbortHandler should be re-panicked, got %v", rec)
+		if err, _ := recover().(error); !errors.Is(err, http.ErrAbortHandler) {
+			t.Errorf("ErrAbortHandler should be re-panicked, got %v", err)
 		}
 	}()
 	abort.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
