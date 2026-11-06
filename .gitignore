@@ -1,0 +1,39 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+secrets/
+credentials*.json
+.npmrc
+.pypirc
+
+# Local databases and dumps
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sql.gz
+data/
+
+# Build and test output
+/bin/
+/dist/
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Tooling, editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+*.log
